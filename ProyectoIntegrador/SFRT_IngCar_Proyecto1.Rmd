@@ -1,0 +1,446 @@
+---
+title: "**Ingeniería de Características, Proyecto Integrador: Contando una historia con los datos de marginacion municipal en Sonora, 2010-2020**"
+author: "Santiago Francisco Robles Tamayo"
+date: "06/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+# **Introducción**
+
+El presente trabajo consta de cuatro partes. En la primera, el objetivo es compartir el proceso de descarga de datos de marginación a nivel municipal en México, para los años 2010 y 2020, de forma automatizada. En la segunda, mostrar el proceso necesario para crear los marcos de datos, o *dataframes*, necesario para estudiar el cambio en la marginación social del estado de Sonora en el periodo en cuestión. Y en la tercera, compartir un diccionario de variables que involucradas en los dataframes creados. 
+
+La cuarta parte del proyecto consiste en hacer un análisis explotatorio de datos (*EDA*) y definir los KPI's (*key performance indicators*) que permitan dar una primera instancia sobre la historia que se desea contar con los datos recabados. Así mismo, crear dos mapas interactivos a través de la librería *Leaflet*, que muestren el diferente grado de marginación por municipio en el estado de Sonora.
+
+El trabajo final será compartido en formato HTML, junto con su respectivo markdown, un repositorio de GitHub con acceso libre.
+
+# **Primera parte**
+
+Instrucción: *Un script o libreta que descargue datos de al menos dos fuentes diferentes, y que genere un archivo texto con la descripción de las fuentes, las fechas de descarga y de ser posible la descripción (o enlaces) que expliquen la naturaleza de los datos descargados. Si los datos venían sin explicación, agregar la explicación propia para simplificar el proceso.*
+
+#### **Descarga de librerías**
+```{r Descarga de librerías}
+# install.packages("tidyverse") # Para manipulación de datos y otras muchas funciones
+# install.packages("htmltools") # Para agregar características html en el caso de mapas interactivos
+# install.packages("htmlwidgets") # Para guardar nuestro mapa como html
+# install.packages("rgdal")# Para el manejo de archivos geográficos
+# install.packages("rgeos") # Para el manejo de archivos geográficos
+# install.packages("rcartocolor") # Paquete de paleta de colores
+# install.packages("leaflet") #  Paquete para crear mapas interactivos
+
+library(tidyverse) # Libreta para el arreglo de datos
+library(htmltools) # Libreta para convertir objetos a HTML
+library(htmlwidgets) # Libreta para convertir objetos a HTML
+library(rgdal) #Libreta de datos georeferenciados
+library(rgeos) #Libreta para mapas
+library(rcartocolor) # Paleta de colores
+library(leaflet) # Libreta para hacer mapas interactivos
+
+
+
+```
+A través del uso de la página web de la Comisión Nacional de Población (CONAPO), se descargaron los datos referentes al índice de marginación a nivel municipal para todas las entidades de la república, de 2010 y 2020. Para esto, se usaron enlaces de CONAPO con terminación *.xls*, por lo que fue necesario instalar la paquetería *readxl* y activar la librería homónima. Después, se usaron los comandos *tempfile()* y *read_excel()* (Stackoverflow, 2016) para generar un dataframe que contiene los datos referentes a marginación de 2020, llamado *data2020_1*.
+
+#### **Descarga de bases de datos**
+```{r Descarga de fuente primaria Datos 2020}
+# install.packages("readxl")
+library(readxl)
+
+url_2020 = "http://www.conapo.gob.mx/work/models/CONAPO/Marginacion/Datos_Abiertos/Municipio/IMM_2020.xls"
+p1f <- tempfile()
+download.file(url_2020, p1f, mode="wb")
+data2020_1 <- read_excel(path = p1f, sheet = 2)
+
+View(data2020_1)
+
+# Cargamos diccionario
+Diccionario <- read_excel(path = p1f, 
+                                 sheet = "Diccionario", range = "a3:b23")
+
+
+
+## Estructura
+str(data2020_1)
+view(Diccionario)
+## Valores únicos
+unique(data2020_1$NOM_ENT)
+unique(data2020_1$GM_2020)
+
+## Niveles
+levels=c("Muy bajo", "Bajo", "Medio", "Alto", "Muy alto") # Definimos los niveles del GM
+
+
+# Se filtran los municipios de Sonora, se ordenan los niveles del GM
+marginacion_municipal_sonora_2020 <- data2020_1 %>% 
+  filter(NOM_ENT=="Sonora") %>% mutate(GM_2020=factor(GM_2020,levels))
+marginacion_municipal_sonora_2020 %>% group_by(GM_2020) %>% summarise(n())
+marginacion_municipal_sonora_2020
+
+```
+
+
+Dado que los datos de marginación a nivel municipal para todas las entidades federativas están separados por año, se ejecutó el mismo procedimiento, por separado, para el año 2010, generando un nuevo dataframe nombrado *data2010*. A diferencia de *data2020_1*, a este dataframe no se le colocó "_1" en su nombre por motivos descritos posteriormente.
+
+```{r Descarga de fuente secundaria datos 2010}
+# install.packages("readxl")
+library(readxl)
+
+url_2010 = "http://www.conapo.gob.mx/work/models/CONAPO/Marginacion/Datos_Abiertos/Municipio/IMM_DP2_2010.xlsx"
+p1f <- tempfile()
+download.file(url_2010, p1f, mode="wb")
+data2010 <- read_excel(path = p1f, sheet = 2)
+
+View(data2010)
+
+## Estructura
+str(data2010)
+view(Diccionario)
+## Valores únicos
+unique(data2010$NOM_ENT)
+unique(data2010$GM_2010)
+
+## Niveles
+levels=c("Muy bajo", "Bajo", "Medio", "Alto", "Muy alto") # Definimos los niveles del GM
+
+
+# Se filtran los municipios de Sonora, se ordenan los niveles del GM
+marginacion_municipal_sonora_2010 <- data2010 %>% 
+  filter(NOM_ENT=="Sonora") %>% mutate(GM_2010=factor(GM_2010,levels))
+marginacion_municipal_sonora_2010 %>% group_by(GM_2010) %>% summarise(n())
+marginacion_municipal_sonora_2010
+```
+
+
+# **Segunda parte**
+Instrucción: *Una libreta o script que transforme y utilice los datos de acuerdo a su tipo, selecciones la información que se desea utilizar y se generen los Dataframes necesarios.*
+
+El siguiente paso consistió en arreglar los dataframes previamente creados para tener sólo los datos de Sonora. Se optó por tener tres dataframes: en el primero, los datos de ambos años para el estado de Sonora en un sólo conjunto; el segundo, los datos de marginación en Sonora en 2010; y el tercero, los datos de marginación en Sonora en 2020. Sin embargo, para lograrlo fue necesaria la creación de otros bloques de datos.
+
+# **Dataframe del total de datos de marginación en Sonora: 2010 y 2010**
+El dataframe con la información conjunta de 2010 y 2020 para Sonora fue el que se realizó primero. Sin embargo, antes de crear ese dataframe, se hizo uno de todas las entidades y muncipios. Primero, se activaron las librerías *tidyvervse* y *dplyr*. Después, se nombró un nuevo dataframe, *data2020*, que contiene todas las columnas de *data2020_1*, con excepción de *NOM_ENT* y *NOM_MUN*, con el motivo de, al realizar un *left_join* a *data2010*, sólo anexar las columnas correspondientes a variables de marginación del año 2020, más la clave municipal. El *left_join* se aplicó tomando de referencia la columna *CVE_EN*, creando la base de datos con todas las variables de marginación y todos los municipios de la república, nombrada *total*. Cabe mencionar que en el siguiente chunk se aprecia el motivo de por qué haber llamado *data2020_1* a los datos de 2020: para que, al aplicar el filtro necesario para crear el dataframe *data2020*, **no se cambiara el dataframe original y pudieran crear los dataframes de los datos de Sonora por año**.
+
+
+```{r Generacion de dataframe total}
+ library(tidyverse)
+ library(dplyr)
+
+data2020 <- data2020_1 %>%
+   select(CVE_MUN, POB_TOT, ANALF, SBASC, OVSDE, OVSEE, OVSAE, OVPT, VHAC, PL.5000, PO2SM, IM_2020, GM_2020, IMN_2020)
+
+ total <- left_join(data2010, data2020, by = "CVE_MUN")
+View(total)
+
+```
+
+
+A partir de este último bloque de datos, se creó el data frame *total_son*, que contiene únicamente los datos de marginación del estado de Sonora, por municipio, para 2010 y 2020. Esto fue posible nombrando un nuevo objeto que sólo considere los datos en los reglones que contengan el número *26* (clave entidad de Sonora) de la columna *CVE_ENT* del dataframe *total*.
+
+
+```{r Generacion de dataframe de Sonora conjunto (2010 y 2020)}
+total_son <- total[total$CVE_ENT == '26',]
+View(total_son)
+total_son
+
+```
+
+# **Generar un archivo csv del data frame**
+
+Se utiliza el siguiente comando para generar un archivo *csv* a partir del data frame *total_son*.
+
+```{r Dataframe a csv}
+
+#write.csv(total_son, "C:\\Users\\santi\\Documents\\MCD_UNISON\\PRIMER_SEMESTRE\\IngenieriaDeCaracteristicas\\data_total_son.csv", row.names=FALSE)
+
+```
+
+
+# **Datos de marginacion en Sonora por año**
+
+Para generar dos dataframes de marginación municipal en Sonora, por año, también se creó un nuevo objeto que sólo considere los datos en los reglones que contengan el número *26* (clave entidad de Sonora) de la columna *CVE_ENT* de las bases *data2020_1* y *data2010*.
+
+```{r Datos de marginacion de Sonora por año}
+data2020_son <- data2020_1[data2020_1$CVE_ENT == '26',]
+View(data2020_son)
+
+data2010_son <- data2010[data2010$CVE_ENT == '26',]
+View(data2010_son)
+
+```
+
+
+# **Otras opciones para generar un dataframe**
+
+Dentro de otra posibles alternativas para generar tidydata de los datos de marginación en Sonora, se encuentran las siguientes. Una consiste en combinar todas las columnas los datos de 2010 y 2020, de todos los municipios y estados; no era conveniente porque hubiese implicado el borrar columnas repetidas. Por otro lado, el comando *merge*, capaz de seleccionar un conjunto de columnas de un dataframe para anexarlo a otro, pudo haber combinado las columnas necesarias para tener en un sólo marco de datos la información nacional, por estados y municipios, de ambos años.
+
+```{r Otra opciones para tener tidydata}
+
+# # merge two data frames by ID
+# total <- merge(data_2020, data_2010, by="CVE_ENT")
+# View(total)
+# 
+# merge(x = data_2020, y = data_2010[ , c("POB_TOT", "ANALF", "SBASC", "OVSDE", "OVSEE", "OVSAE", "OVPT", "VHAC", "PL.5000", "PO2SM", "IM_2010", "GM_2010", "IMN_2010")], by = "CVE_MUN")
+
+```
+
+# **Tercer parte**
+# **Diccionario de variables**
+
+Instrucción: *Un diccionario de datos por cada dataframe*
+
+A continuación, se nombró un diccionario de datos único para las tres dataframes de interés, pues todas manejan las mismas columnas o variables. Sólo en el dataframe *total_son* hay una pequeña diferencia: son las mismas variables, pero se distinguen con *.x* al final las que corresponden al año 2010, y con *.y* al final aquellas que son del año 2020.
+
+* *CVE_ENT*: Clave única por entidad federativa de México en función del órden alfabético, donde, por ejemplo, *01* es *Aguascalientes* y *32* es *Zacatecas*.
+* *NOM_ENT*: Nombre de la entidad federativa de México.
+* *CVE_MUN*: Clave única por municipio, cuyos primeros dos dígitos corresponden al estado al que pertenece. Sus dígitos también obedecen a un orden alfabético.
+* *NOM_MUN*: Nombre del municipio.
+* *POB_TOT*: Población total.
+* *ANALF*: Porcentaje de población analfabeta de 15 años o más.
+* *SBASC*: Porcentaje de población de 15 años o más sin educación básica
+* *OVSDE*:	Porcentaje de ocupantes en viviendas particulares habitadas sin drenaje ni excusado
+* *OVSEE*:	Porcentaje de ocupantes en viviendas particulares habitadas sin energía eléctrica
+* *OVSAE*:	Porcentaje de ocupantes en viviendas particulares habitadas sin agua entubada
+* *OVPT*:	Porcentaje de ocupantes en viviendas particulares habitadas con piso de tierra
+* *VHAC*:	Porcentaje de viviendas particulares con hacinamiento
+* *PL.5000*:	Porcentaje de población que vive en localidades menores a 5 000 habitantes
+* *PO2SM*:	Porcentaje de población ocupada con ingresos de hasta 2 salarios mínimos
+* *IM_2020*:	Índice de marginación, 2020. Entre más bajo sea el valor, mayor es el grado de marginación.
+* *GM_2020*:	Grado de marginación, 2020.
+* *IMN_2010*:	Índice de marginación normalizado, 2010. Entre más bajo sea el valor, mayor es el grado de marginación.
+* *IM_2010*:	Índice de marginación, 2010
+* *GM_2010*:	Grado de marginación, 2010
+* *IMN_2010*:	Índice de marginación normalizado, 2010
+* *IM_TC*: Tasa de crecimiento del Índice de Marginación, 2010-2020
+* *IMN_TC*: Tasa de crecimiento del Índice de Marginación Normalizado, 2010-2020
+* *POB_TC*: Tasa de crecimiento de la población total por municipio, 2010-2020
+* *ANALF_TC*: Tasa de crecimiento del porcentaje de población analfabeta de 15 años o más, 2010-2020
+* *SBASC_TC*: Tasa de crecimiento del porcentaje de población de 15 años o más sin educación básica, 2010-2020
+* *OVSDE_TC*:	Tasa de crecimiento del porcentaje de ocupantes en viviendas particulares habitadas sin drenaje ni excusado, 2010-2020
+* *OVSEE_TC*:	Tasa de crecimiento del porcentaje de porcentaje de ocupantes en viviendas particulares habitadas sin energía eléctrica; 2010-2020
+* *OVSAE_TC*:	Tasa de crecimiento del porcentaje de ocupantes en viviendas particulares habitadas sin agua entubada, 2010-2020
+* *OVPT_TC*:	Tasa de crecimiento del porcentaje de ocupantes en viviendas particulares habitadas con piso de tierra, 2010-2020
+* *VHAC_TC*:	Tasa de crecimiento del porcentaje de viviendas particulares con hacinamiento, 2010-2020
+* *PL.5000_TC*:	Tasa de crecimiento del porcentaje de población que vive en localidades menores a 5000 habitantes, 2010-2020
+* *PO2SM_TC*:	Tasa de crecimiento del porcentaje de población ocupada con ingresos de hasta 2 salarios mínimos, 2010-2020
+
+
+# **Cuarta parte**
+# **Análisis explotarotio de datos**
+
+# **Gráficas de disperción**
+```{r Gráfica de IM en función del porcentaje de población analfabeta de 15 años o más: 2010}
+NOM_MUN <- data.frame(total_son$NOM_MUN, row.names = total_son$NOM_MUN, 
+                     check.rows = FALSE,
+                     check.names = TRUE,
+                     fix.empty.names = TRUE,
+                     stringsAsFactors = FALSE)
+NOM_MUN
+
+ggplot(total_son, aes(x=ANALF.x, y=IM_2010)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+
+
+```{r Gráfica de IM en función del porcentaje de población analfabeta de 15 años o más en función del: 2020}
+library(ggplot2)
+
+
+ggplot(total_son, aes(x=ANALF.y, y=IM_2020)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T +
+      theme(axis.text.x = element_text(angle = 90)))
+
+
+  
+```
+
+
+
+```{r Gráfica del logaritmo de la población total en función del IM: 2010}
+ggplot(total_son, aes(x=log(POB_TOT.x), y=IM_2010)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+
+```{r Gráfica del porcentaje de población de 15 años o más sin educación básica en función del IM: 2020}
+ggplot(total_son, aes(x=log(POB_TOT.y), y=IM_2020)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+```{r Gráfica del IM en función del porcentaje de población que vive con menos de dos salarios mínimos: 2010}
+ggplot(total_son, aes(x=PO2SM.x, y=IM_2010)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+```{r Gráfica del IM en función del porcentaje de población que vive con menos de dos salarios mínimos: 2020}
+ggplot(total_son, aes(x=PO2SM.y, y=IM_2020)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+# **Heatmaps**
+```{r Heatmap 2010}
+# tag_2010 <-  data.frame(total_son$ANALF.x, total_son$SBASC.x, total_son$OVSDE.x, total_son$OVSEE.x, total_son$OVSAE.x, total_son$OVPT.x, total_son$VHAC.x, total_son$PL.5000.x, total_son$PO2SM.x, total_son$IM_2010)
+# 
+# tag_2010
+
+Matriz_2010 <- data.frame(total_son$ANALF.x, total_son$SBASC.x, total_son$OVSDE.x, total_son$OVSEE.x, total_son$OVSAE.x, total_son$OVPT.x, total_son$VHAC.x, total_son$PL.5000.x, total_son$PO2SM.x, total_son$IM_2010, row.names = total_son$NOM_MUN ,   
+                      check.rows = FALSE,
+                      check.names = TRUE,
+                      fix.empty.names = TRUE,
+                      stringsAsFactors = FALSE)
+
+
+
+Matriz_2010
+
+Heatmap_2010 <- as.matrix(Matriz_2010)
+
+heatmap(Heatmap_2010)
+heatmap(Heatmap_2010, scale="column")
+
+```
+
+```{r Heatmap 2020}
+Matriz_2020 <- data.frame(total_son$ANALF.y, total_son$SBASC.y, total_son$OVSDE.y, total_son$OVSEE.y, total_son$OVSAE.y, total_son$OVPT.y, total_son$VHAC.y, total_son$PL.5000.y, total_son$PO2SM.y, total_son$IM_2020, row.names = total_son$NOM_MUN ,   
+                      check.rows = FALSE,
+                      check.names = TRUE,
+                      fix.empty.names = TRUE,
+                      stringsAsFactors = FALSE)
+
+
+
+Matriz_2020
+
+Heatmap_2020 <- as.matrix(Matriz_2020)
+
+heatmap(Heatmap_2020)
+heatmap(Heatmap_2020, scale="column")
+
+
+```
+
+# **Definición de objetivo y KPI**
+A partir de los datos de marginación municipal en Sonora, años 2010 y 2020, es posible conocer el cambio en valores de marginación y sus componentes para saber qué municipios man crecido más que otros en estas variables, cuáles han permanecido igual, en qué municipios se refleja un mejor o peor escenario salaria.
+
+Los *Key performance indicators* establecidos fueron las tasas de crecimiento de los Índices de Marginación y sus componentes. Sin embargo, considerando la correlación de algunas de estas variables, los KPI's más importantes son: IM_TC, POB_TC, ANALF_TC y PO2SM_TC.
+```{r Tasas de crecimiento del IM y sus componentes}
+total_son <- total_son %>% 
+  #select(IM_2010) %>%
+  arrange(CVE_MUN) %>%
+  #group_by(county) %>%
+  mutate(IM_TC = ((IM_2020/IM_2010)-1)*100) %>%
+  mutate(IMN_TC = ((IMN_2020/IMN_2010)-1)*100) %>%
+  mutate(POB_TC = ((POB_TOT.y/POB_TOT.x)-1)*100) %>%
+  mutate(ANALF_TC = ((ANALF.y/ANALF.x)-1)*100) %>%
+  mutate(SBASC_TC = ((SBASC.y/SBASC.x)-1)*100) %>%
+  mutate(OVSDE_TC = ((OVSDE.y/OVSDE.x)-1)*100) %>%
+  mutate(OVSEE_TC = ((OVSEE.y/OVSEE.x)-1)*100) %>%
+  mutate(OVSAE_TC = ((OVSAE.y/OVSAE.x)-1)*100) %>%
+  mutate(OVPT_TC = ((OVPT.y/OVPT.x)-1)*100) %>%
+  mutate(VHAC_TC = ((VHAC.y/VHAC.x)-1)*100) %>%
+  mutate(PL.5000_TC = ((PL.5000.y/PL.5000.x)-1)*100) %>%
+  mutate(PO2SM_TC = ((PO2SM.y/PO2SM.x)-1)*100) %>%
+    
+  ungroup()
+
+total_son
+
+
+```
+
+A continuación, se presentan las gráficas para visualizar el crecimiento de los principales KPY's:
+
+
+```{r Gráfica de la tasa de crecimiento del Índice de marginación en función del Índice de Marginación de 2010}
+ggplot(total_son, aes(x=IM_2010, y=IM_TC)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+# Para verificar la situación general de Quiriego, se aplica el siguiente comando, que llama al renglón con la informacióin de dicho municipio del data frame correspondiente.
+total_son[total_son$NOM_MUN == 'Quiriego',]
+
+```
+```{r Gráfica de la tasa de crecimiento de la población 2010-2020 en función del logaritmo de la población de 2010}
+ggplot(total_son, aes(x=log(POB_TOT.x), y=POB_TC)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+```{r Gráfica de la tasa de crecimiento del analfabetismo en función del porcentaje de personas analfabetas de 2010}
+ggplot(total_son, aes(x=ANALF.x, y=ANALF_TC)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+```{r Gráfica de convergencia del pago de hasta 2SM 2010}
+ggplot(total_son, aes(x=PO2SM.x, y=PO2SM_TC)) +
+  geom_point() + # Show dots
+  geom_text(
+    label=rownames(NOM_MUN), 
+    nudge_x = 0.25, nudge_y = 0.25, 
+    check_overlap = T )
+
+```
+
+# **Conclusiones**
+
+El proceso descrito previamente es sólamente el primer paso no sólo de este, sino cualquier proyecto de ciencia de datos. La obtención automatizada de datos, a través de enlaces (como fue caso presente) o APIs, facilita y democratiza el uso de scripts o modelos para la comunidad involucrada en la ciencia de datos u otras disciplinas de investigación. El uso de comandos, tales como *left_join*, es fundamental para generar bases de datos *tidy*¨, u ordenadas. El caso descrito fue relativament sencillo por ser datos provenientes de una fuente oficial del gobienro federal, pero el escenario común es encontrar bases de datos incopletas, con valores nulos (NA), desactualizadas y sin orden de columnas. En este sentido, es indispensable tener en consideración comandos para limpiar una base de datos, independientemente del lenguaje de programación. Por último, un diccionario de datos es parte fundamental para conocer el fenómeno a analizar. Sin éste, carece de sentido la interpretación del modelo o análisis que parte de los datos.
+
+El análisis exploratorio de datos sugiere que, entre 2010 y 2020, el Índice de Margainación a nivel municipal en el Edo. de Sonora, si bien ha diminuido en algunas zonas marginadas, éstas han permanecido en su misma posición en comparación con el resto de los municipios de Sonora. Por ejemplo, aunque haya disminuido la el índice de marginación en Quiriego, esta localidad mantiene su posición marginal respecto a los demás municipios. De igual forma, Hermosillo, Obregón y Nogales mantienen su posición como ciudades con menor grado de marginación.
+
+Los KPI's fueron las tasas de crecimientol índice de marginación, junto con sus componentes, pero se eligieron principalmente cuatro indicadores: la tasa de crecimiento del índice de marginación (IM_TC), la tasa de crecimiento de la población (POB_TC), la tasa de crecimiento del porcentaje de población analfabeta mayor a 15 años (ANALF_TC) y la tasa de crecimiento del porcentaje de personas economicamente ocupadas que ganan hasta dos salarios mínimps (PO2SM_TC). La razón por la cual se eligieron estos indicadores fue su mayor relevancia respecto a los demás para definir el grado de marginación municiapal, pues varios de los componentes del IM están autocorrelacionados.
+
+A partir de esta información, será posible generar un dashboard en línea que refleje el cambio en el grado de marginación municipal en Sonora, entre 2010 y 2020.
+
+
+
+# **Bibliografía**
+* Comisión Nacional de Población (CONAPO). (2020). Indicadores de marginación. gob.mx. Retrieved October 16, 2022, from [gob](https://www.gob.mx/conapo/documentos/indices-de-marginacion-2020-284372)
+* Holtz, Y. (n.d.). Add text labels with ggplot2. Retrieved November 2, 2022, from [r-graph-gallery.com](https://r-graph-gallery.com/275-add-text-labels-with-ggplot2.html)
+* Holtz, Y. (n.d.-b). Building heatmap with R. Retrieved November 2, 2022, from [r-graph-gallery.com](https://r-graph-gallery.com/215-the-heatmap-function.html)
+* How to calculate growth rate from two different columns to a new column with dplyr? (2021, February 19). [Stack Overflow](https://stackoverflow.com/questions/66282209/how-to-calculate-growth-rate-from-two-different-columns-to-a-new-column-with-dpl)
+* how to insert image from url in markdown. (2015, March 7). [Stack Overflow](https://stackoverflow.com/questions/28912868/how-to-insert-image-from-url-in-markdown)
+* *Left join only selected columns in R with the merge() function*. (2014, June 12). Stack Overflow. Retrieved October 16, 2022, from [stackoverflow](https://stackoverflow.com/questions/24191497/left-join-only-selected-columns-in-r-with-the-merge-function)
+* Spar User: NNK. (2022, July 10). [Spark by {Examples}](https://sparkbyexamples.com/r-programming/select-rows-in-r/)
+* *Read Excel file from a URL using the readxl package*. (2016, December 28). Stack Overflow. Retrieved October 13, 2022, from [stackoverflow](https://stackoverflow.com/questions/41368628/read-excel-file-from-a-url-using-the-readxl-package)
+* Spark by Examples. (2022, July 10). How to Select Rows in R with Examples. Retrieved October 16, 2022, from [sparkbyexmaples](https://sparkbyexamples.com/r-programming/select-rows-in-r/)
