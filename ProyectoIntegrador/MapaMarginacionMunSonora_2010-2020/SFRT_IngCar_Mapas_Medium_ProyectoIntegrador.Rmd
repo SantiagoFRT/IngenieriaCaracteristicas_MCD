@@ -1,0 +1,295 @@
+---
+title: "SFRT_IngCar_Medium"
+author: "Santiago Francisco Robles Tamayo"
+date: "24/11/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#### Descarga de librerías
+```{r Descarga de librerías}
+# install.packages("tidyverse") # Para manipulación de datos y otras muchas funciones
+# install.packages("htmltools") # Para agregar características html en el caso de mapas interactivos
+# install.packages("htmlwidgets") # Para guardar nuestro mapa como html
+# install.packages("rgdal")# Para el manejo de archivos geográficos
+# install.packages("rgeos") # Para el manejo de archivos geográficos
+# install.packages("rcartocolor") # Paquete de paleta de colores
+# install.packages("leaflet") #  Paquete para crear mapas interactivos
+# install.packages("readxl")
+# install.packages("magrittr")
+
+library(readxl)
+library(tidyverse)
+library(htmltools)
+library(htmlwidgets)
+library(rgdal)
+library(rgeos)
+library(rcartocolor)
+library(leaflet)
+library(magrittr)
+```
+
+
+
+#### Descarga de bases de datos
+```{r Data Download}
+
+url_2010 = "http://www.conapo.gob.mx/work/models/CONAPO/Marginacion/Datos_Abiertos/Municipio/IMM_DP2_2010.xlsx"
+p1f <- tempfile()
+download.file(url_2010, p1f, mode="wb")
+data2010 <- read_excel(path = p1f, sheet = 2)
+
+data2010$GM_2010[data2010$GM_2010 == 'Muy bajo'] <- 'Very low'
+data2010$GM_2010[data2010$GM_2010 == 'Bajo'] <- 'Low'
+data2010$GM_2010[data2010$GM_2010 == 'Medio'] <- 'Medium'
+data2010$GM_2010[data2010$GM_2010 == 'Alto'] <- 'High'
+data2010$GM_2010[data2010$GM_2010 == 'Muy alto'] <- 'Very high'
+
+View(data2010)
+
+
+
+
+url_2020 = "http://www.conapo.gob.mx/work/models/CONAPO/Marginacion/Datos_Abiertos/Municipio/IMM_2020.xls"
+p1f <- tempfile()
+download.file(url_2020, p1f, mode="wb")
+data2020 <- read_excel(path = p1f, sheet = 2)
+
+data2020$GM_2020[data2020$GM_2020 == 'Muy bajo'] <- 'Very low'
+data2020$GM_2020[data2020$GM_2020 == 'Bajo'] <- 'Low'
+data2020$GM_2020[data2020$GM_2020 == 'Medio'] <- 'Medium'
+data2020$GM_2020[data2020$GM_2020 == 'Alto'] <- 'High'
+data2020$GM_2020[data2020$GM_2020 == 'Muy alto'] <- 'Very high'
+
+View(data2020)
+
+```
+
+
+
+```{r}
+
+## Niveles
+levels=c("Very low", "Low", "Medium", "High", "Very high")
+
+
+# Se filtran los municipios de Sonora, se ordenan los niveles del GM
+municipal_sonora_2010 <- data2010 %>% 
+  filter(NOM_ENT=="Sonora") %>% mutate(GM_2010=factor(GM_2010,levels))
+municipal_sonora_2010 %>% group_by(GM_2010) %>% summarise(n())
+municipal_sonora_2010
+
+# Se filtran los municipios de Sonora, se ordenan los niveles del GM
+municipal_sonora_2020 <- data2020 %>% 
+  filter(NOM_ENT=="Sonora") %>% mutate(GM_2020=factor(GM_2020,levels))
+municipal_sonora_2020 %>% group_by(GM_2020) %>% summarise(n())
+municipal_sonora_2020
+
+# Se renombra la columna "CVE_MUN" por "CVEGEO" para poder hacer un merge con los datos del archivo shape
+
+municipal_sonora_2010 <- rename(municipal_sonora_2010, CVEGEO = CVE_MUN)
+municipal_sonora_2020 <- rename(municipal_sonora_2020, CVEGEO = CVE_MUN)
+View(municipal_sonora_2010)
+View(municipal_sonora_2020)
+```
+
+
+#### Creación de mapas
+```{r Shape files}
+
+# Cartografia con Rgdal interfase de "Geospatial Abstraction Library (GDAL)
+mun_base<- readOGR(dsn = "00mun.dbf", layer = "00mun")
+
+# Cartografia por entidad federativa de México
+ent <- readOGR(dsn = "00ent.dbf", layer = "00ent")
+
+# Crear identificador para entidad federativa, por posiciones de los dos
+#prieros valores
+mun_base@data$id_ent <- substr(mun_base@data$CVEGEO,1,2)
+
+# Año 2010
+mun_Son_2010 <- mun_base[mun_base@data$id_ent=="26",]
+mun_Son_2010 <- spTransform(mun_Son_2010, 
+                        CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+
+# Año 2020
+mun_Son_2020 <- mun_base[mun_base@data$id_ent=="26",]
+mun_Son_2020<- spTransform(mun_Son_2020, 
+                        CRS("+proj=longlat +datum=WGS84 +ellps=WGS84 +towgs84=0,0,0"))
+
+
+## Agregamos la información del GM a la capa geográfica
+
+# 2010
+mun_Son_2010 <- mun_Son_2010 %>% merge(municipal_sonora_2010) # Unimos ambas capas
+View(mun_Son_2010@data)
+
+
+# 2020
+mun_Son_2020 <- mun_Son_2020 %>% merge(municipal_sonora_2020) # Unimos ambas capas
+View(mun_Son_2020@data)
+
+
+```
+
+
+#### Colores
+```{r Colors}
+
+# Generamos la paleta de colores
+
+Colors <- carto_pal(5, "TealRose")
+
+margpal <-  colorFactor(Colors, levels=c("Very low", "Low", "Medium", "High", "Very high"), na.color =alpha("#e8e6e6", 0))
+
+
+```
+
+
+
+#### Map popups
+
+```{r popup: 2010 y 2020}
+popup_2010 <- paste0(
+  "<b>", "Municipality: ", "</b>", as.character(mun_Son_2010$NOM_MUN),"<br>", 
+  "<b>", "Marginalization level: ", "</b>",   as.character(mun_Son_2010$GM_2010),      "<br>",
+  "<b>", "Total population: ", "</b>",   prettyNum(as.numeric(mun_Son_2010$POB_TOT), big.mark=",", preserve.width="none"), "<br>",
+   "<b>", "illiterate percentage of people 15-year-old or older: ", "</b>", round(mun_Son_2010$ANALF,1),"%", "<br>",
+   "<b>", "percentage of people 15-year-old or older without basic education:   ", "</b>", round(mun_Son_2010$SBASC,1),"%","<br>",
+  "<b>", "percentage of occupants in inhabited private homes without drainage or toilets: ", "</b>", round(mun_Son_2010$OVSDE,1), "%","<br>",
+  "<b>", "percentage of occupants in inhabited private homes without electricity: ", "</b>", round(mun_Son_2010$OVSEE,1),  "%", "<br>",
+  "<b>", "percentage of occupants in inhabited private homes without piped water: ", "</b>", round(mun_Son_2010$OVSAE,1), "%","<br>",
+  "<b>", "percentage of occupants in inhabited private homes with a dirt floor: ", "</b>", round(mun_Son_2010$OVPT,1), "%","<br>",
+  "<b>", "percentage of private homes with overcrowding: ", "</b>", round(mun_Son_2010$VHAC,1),  "%","<br>") %>%
+  lapply(htmltools::HTML)
+
+
+
+popup_2020 <- paste0(
+  "<b>", "Municipality: ", "</b>", as.character(mun_Son_2020$NOM_MUN),"<br>", 
+  "<b>", "Marginalization level: ", "</b>",   as.character(mun_Son_2020$GM_2020),      "<br>",
+  "<b>", "Total population: ", "</b>",   prettyNum(as.numeric(mun_Son_2020$POB_TOT), big.mark=",", preserve.width="none"), "<br>",
+   "<b>", "illiterate percentage of people 15-year-old or older: ", "</b>", round(mun_Son_2020$ANALF,1),"%", "<br>",
+   "<b>", "percentage of people 15-year-old or older without basic education:   ", "</b>", round(mun_Son_2020$SBASC,1),"%","<br>",
+  "<b>", "percentage of occupants in inhabited private homes without drainage or toilets: ", "</b>", round(mun_Son_2020$OVSDE,1), "%","<br>",
+  "<b>", "percentage of occupants in inhabited private homes without electricity: ", "</b>", round(mun_Son_2020$OVSEE,1),  "%", "<br>",
+  "<b>", "percentage of occupants in inhabited private homes without piped water: ", "</b>", round(mun_Son_2020$OVSAE,1), "%","<br>",
+  "<b>", "percentage of occupants in inhabited private homes with a dirt floor: ", "</b>", round(mun_Son_2020$OVPT,1), "%","<br>",
+  "<b>", "percentage of private homes with overcrowding: ", "</b>", round(mun_Son_2020$VHAC,1),  "%","<br>") %>%
+  lapply(htmltools::HTML)
+
+
+```
+
+
+
+#### Mapa de marginación munucipal en Sonora: 2010-2020
+
+```{r Marginalization index level map by municipality in Sonora 2010-2020}
+
+map_mun_marg_2010_2020 <- leaflet(mun_Son_2010) %>% 
+  addProviderTiles(providers$CartoDB.Voyager) %>% # map backgradoun color
+    addPolygons(data= mun_Son_2010, # data layer
+              stroke= TRUE, # Border lines
+              weight=0.5,  # Border lines thicness                
+              opacity=1, # Opacity of border lines
+              color= "black", # Boder line color
+              fillColor = ~margpal(mun_Son_2010$GM_2010), # Use of color palette
+              fillOpacity = 0.6, # Background opacity
+              smoothFactor = 1, # Smooth factor for border lines
+              highlightOptions = highlightOptions(color = "black", # Highlight the polygons where mouse is set
+                                                  weight = 1.2,
+                                                  bringToFront = TRUE),
+              popup = popup_2010, # Popup
+              popupOptions = labelOptions(noHide = F, direction = "auto",  closeOnClick = TRUE, # popup options
+                                    style = list( # popup characteristics
+                                            "color" = "black",
+                                            "font-family" = "Arial",
+                                            "font-style" = "regular",
+                                            "box-shadow" = "2px 2px rgba(0,0,0,0.25)",
+                                            "font-size" = "8px",
+                                            "border-color" = "rgba(0,0,0,0.5)"
+                                          )),
+              group= "2010") %>% # Name of the menu option. This would be more usefeull when adding more data layers.
+  addPolygons(data= mun_Son_2020, # Layer of with data from 2020
+              stroke= TRUE, # Border lines
+weight=0.5,  # Border lines thicness                
+opacity=1, # Opacity of border lines
+color= "black", # Boder line color
+fillColor = ~margpal(mun_Son_2020$GM_2020), # Use of color palette
+fillOpacity = 0.6, # Background opacity
+smoothFactor = 1, # Smooth factor for border lines
+highlightOptions = highlightOptions(color = "black", # Highlight the polygons where mouse is set
+                                    weight = 1.2,
+                                    bringToFront = TRUE),
+popup = popup_2020, # 2020 Popup
+popupOptions = labelOptions(noHide = F, direction = "auto",  closeOnClick = TRUE, # popup options
+                            style = list( # popup characteristics
+                              "color" = "black",
+                              "font-family" = "Arial",
+                              "font-style" = "regular",
+                              "box-shadow" = "2px 2px rgba(0,0,0,0.25)",
+                              "font-size" = "8px",
+                              "border-color" = "rgba(0,0,0,0.5)"
+                            )),
+              group= "2020") %>% # Menu option for 2020
+  addLegend(position = "bottomleft",  pal = margpal, values = ~mun_Son_2010$GM_2010, opacity=1, group= "Social Exlusion Index", # Legend
+            title = "MARGINALIZATION INDEX LEVEL IN SONORA; <br>CONAPO, 2010-2020<br>(click on the area of interest for more info.)", na.label = "No aplica") %>% 
+  addLayersControl( 
+    baseGroups = c("2010", "2020"), 
+    options = layersControlOptions(collapsed = FALSE, position = "bottomleft"))
+ 
+
+map_mun_marg_2010_2020
+
+```
+
+
+```{r Save map on a HTML file}
+
+# saveWidget(map_mun_marg_2010_2020,"marg_Son_2010_2020.html", title= "Marginalization Index in Sonora: 2010-2020", selfcontained = T, libdir = "lib")
+
+```
+
+
+
+#### Mapa de marginación munucipal en Sonora: 2020
+
+```{r Marginalization index map by municipality in Sonora 2020}
+# map_mun_marg_2020 <- leaflet(mun_Son_2020) %>% 
+#   addProviderTiles(providers$CartoDB.Voyager) %>% # map backgradoun color
+#     addPolygons(data= mun_Son_2020, # data layer
+#               stroke= TRUE, # Border lines
+#               weight=0.5,  # Border lines thicness                
+#               opacity=1, # Opacity of border lines
+#               color= "black", # Boder line color
+#               fillColor = ~margpal(mun_Son_2020$GM_2020), # Use of color palette
+#               fillOpacity = 0.6, # Background opacity
+#               smoothFactor = 1, # Smooth factor for border lines
+#               highlightOptions = highlightOptions(color = "black", # Highlight the polygons where mouse is set
+#                                                   weight = 1.2,
+#                                                   bringToFront = TRUE),
+#               popup = popup_2020, # Popup
+#               popupOptions = labelOptions(noHide = F, direction = "auto",  closeOnClick = TRUE, # popup options
+#                                     style = list( # popup characteristics
+#                                             "color" = "black",
+#                                             "font-family" = "Arial",
+#                                             "font-style" = "regular",
+#                                             "box-shadow" = "2px 2px rgba(0,0,0,0.25)",
+#                                             "font-size" = "8px",
+#                                             "border-color" = "rgba(0,0,0,0.5)"
+#                                           )),
+#               group= "Municipality") %>% # Name of the menu option. This would be more usefeull when adding more data layers.
+#   addLegend(position = "bottomleft",  pal = margpal, values = ~mun_Son_2020$GM_2020, opacity=1, group= "Social Exlusion Index", # Leyenda de referencia
+#             title = "MARGINALIZATION INDEX LEVEL IN SONORA; <br>CONAPO, 2020<br>(click on the area of interest for more info.)", na.label = "No aplica") %>% 
+#   addLayersControl( 
+#     baseGroups = c("Municipality"), 
+#     options = layersControlOptions(collapsed = FALSE, position = "bottomleft"))
+#  
+# 
+# map_mun_marg_2020
+
+```
